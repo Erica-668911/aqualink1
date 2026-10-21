@@ -1,0 +1,117 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    function stationForAuthEmail() {
+      return request.auth.token.email == 'owner@aqualink.com'
+        ? 'AquaPure Water Station'
+        : request.auth.token.email == 'bluedrop.owner@aqualink.com'
+          ? 'BlueDrop Water Station'
+          : '';
+    }
+
+    function isOwnerForStation(stationName) {
+      return signedIn()
+        && exists(/databases/$(database)/documents/owners/$(request.auth.uid))
+        && get(/databases/$(database)/documents/owners/$(request.auth.uid))
+          .data.stationName == stationName;
+    }
+
+    function isStationOwnerAccount() {
+      return signedIn()
+        && exists(/databases/$(database)/documents/owners/$(request.auth.uid));
+    }
+
+    function canReadStationData(stationName) {
+      return !isStationOwnerAccount()
+        || isOwnerForStation(stationName);
+    }
+
+    function orderPath(orderNumber) {
+      return /databases/$(database)/documents/orders/$(orderNumber);
+    }
+
+    function canReadOrder(order) {
+      return (signedIn() && order.customerUid == request.auth.uid)
+        || isOwnerForStation(order.station);
+    }
+
+    match /users/{userId} {
+      allow read, write: if request.auth != null && request.auth.uid == userId;
+    }
+
+    match /user_phones/{mobile} {
+      allow read: if request.auth != null;
+      allow create: if request.auth != null
+        && request.resource.data.uid == request.auth.uid;
+      allow update, delete: if request.auth != null
+        && resource.data.uid == request.auth.uid;
+    }
+
+    match /owners/{ownerId} {
+      allow read: if signedIn() && request.auth.uid == ownerId;
+      allow create, update: if signedIn()
+        && request.auth.uid == ownerId
+        && stationForAuthEmail() != ''
+        && request.resource.data.stationName == stationForAuthEmail();
+      allow delete: if false;
+    }
+
+    match /stations/{stationId} {
+      allow read: if canReadStationData(resource.data.name);
+      allow create: if isOwnerForStation(request.resource.data.name);
+      allow update: if isOwnerForStation(resource.data.name)
+        && request.resource.data.name == resource.data.name;
+      allow delete: if false;
+    }
+
+    match /station_details/{stationId} {
+      allow read: if canReadStationData(stationId);
+      allow write: if isOwnerForStation(stationId);
+    }
+
+    match /products/{productId} {
+      allow read: if canReadStationData(resource.data.stationName);
+      allow create: if isOwnerForStation(request.resource.data.stationName);
+      allow update: if isOwnerForStation(resource.data.stationName)
+        && isOwnerForStation(request.resource.data.stationName);
+      allow delete: if isOwnerForStation(resource.data.stationName);
+    }
+
+    match /orders/{orderId} {
+      allow read: if canReadOrder(resource.data);
+      allow create: if signedIn()
+        && request.resource.data.customerUid == request.auth.uid;
+      allow update: if isOwnerForStation(resource.data.station)
+        && request.resource.data.station == resource.data.station
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['status', 'reason', 'completedAt', 'updatedAt']);
+      allow delete: if false;
+    }
+
+    match /order_items/{itemId} {
+      allow read: if canReadOrder(get(orderPath(resource.data.orderNumber)).data);
+      allow create: if signedIn()
+        && getAfter(orderPath(request.resource.data.orderNumber)).data.customerUid
+          == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    match /deliveries/{deliveryId} {
+      allow read: if canReadOrder(get(orderPath(resource.data.orderNumber)).data);
+      allow create: if signedIn()
+        && getAfter(orderPath(request.resource.data.orderNumber)).data.customerUid
+          == request.auth.uid;
+      allow update: if isOwnerForStation(get(orderPath(resource.data.orderNumber)).data.station);
+      allow delete: if false;
+    }
+
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
