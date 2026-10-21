@@ -275,8 +275,6 @@ class _CustomerDashboard extends StatelessWidget {
           ),
         ),
         const SizedBox(height: 14),
-        const _SearchBox(),
-        const SizedBox(height: 22),
         const _SectionTitle(
           'Water stations in Clarin, Bohol',
           trailing: 'View all',
@@ -372,29 +370,6 @@ class _CustomerScaffold extends StatelessWidget {
       ),
       Expanded(child: child),
     ],
-  );
-}
-
-class _SearchBox extends StatelessWidget {
-  const _SearchBox();
-  @override
-  Widget build(BuildContext context) => Container(
-    padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 12),
-    decoration: BoxDecoration(
-      color: Colors.white,
-      border: Border.all(color: _line),
-      borderRadius: BorderRadius.circular(11),
-    ),
-    child: const Row(
-      children: [
-        Icon(Icons.search, size: 18, color: _muted),
-        SizedBox(width: 9),
-        Text(
-          'Search water stations',
-          style: TextStyle(fontSize: 11, color: _muted),
-        ),
-      ],
-    ),
   );
 }
 
