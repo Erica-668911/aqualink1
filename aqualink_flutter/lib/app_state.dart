@@ -57,6 +57,14 @@ class AccountCredentials {
         cJoanOwnerEmail => 'CJoan Station Owner',
         _ => null,
       };
+
+  static String? mobileForOwnerEmail(String email) =>
+      switch (email.trim().toLowerCase()) {
+        ownerEmail => '09170000001',
+        jAndPOwnerEmail => '09170000003',
+        cJoanOwnerEmail => '09170000004',
+        _ => null,
+      };
 }
 
 class AppState extends ChangeNotifier {

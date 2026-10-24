@@ -44,12 +44,15 @@ class _LoginScreenState extends State<LoginScreen> {
                 decoration: const InputDecoration(
                   labelText: 'Registered email address',
                 ),
-                validator: (value) => value != null &&
-                        RegExp(r'^[^\s@]+@[^\s@]+\.[^\s@]+$').hasMatch(value.trim())
+                validator: (value) =>
+                    value != null &&
+                        RegExp(
+                          r'^[^\s@]+@[^\s@]+\.[^\s@]+$',
+                        ).hasMatch(value.trim())
                     ? null
                     : 'Enter a valid email address',
               ),
-            ],  
+            ],
           ),
         ),
         actions: [
@@ -73,12 +76,12 @@ class _LoginScreenState extends State<LoginScreen> {
     if (submitted != true || !mounted) return;
 
     try {
-      await FirestoreService.sendPasswordReset(
-        email: emailValue,
-      );
+      await FirestoreService.sendPasswordReset(email: emailValue);
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Password reset link sent to your email.')),
+        const SnackBar(
+          content: Text('Password reset link sent to your email.'),
+        ),
       );
     } on FirebaseAuthException catch (error) {
       if (!mounted) return;
@@ -89,9 +92,9 @@ class _LoginScreenState extends State<LoginScreen> {
         'invalid-email' => 'Enter a valid email address.',
         _ => 'We could not send the reset email. Please try again.',
       };
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(message)),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
     } catch (_) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -138,18 +141,17 @@ class _LoginScreenState extends State<LoginScreen> {
       normalizedLoginId,
     );
     final isOwner = ownerStation != null;
-    final role = isOwner
-        ? AccountRole.stationOwner
-        : AccountRole.customer;
+    final role = isOwner ? AccountRole.stationOwner : AccountRole.customer;
 
     if (isOwner &&
-      Firebase.apps.isEmpty &&
-      password != AccountCredentials.passwordForOwnerEmail(normalizedLoginId)) {
+        Firebase.apps.isEmpty &&
+        password !=
+            AccountCredentials.passwordForOwnerEmail(normalizedLoginId)) {
       if (!mounted) return;
       setState(() => _submitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Invalid credentials.')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(const SnackBar(content: Text('Invalid credentials.')));
       return;
     }
 
@@ -162,19 +164,20 @@ class _LoginScreenState extends State<LoginScreen> {
           password: password,
         );
         final uid = credential.user?.uid;
-        final ownerProfile = uid == null
-            ? null
-            : await FirestoreService.loadOwnerProfile(uid);
-        if (ownerProfile == null || ownerProfile['stationName'] != ownerStation) {
-          throw StateError('This owner account has no assigned station.');
+        if (uid == null) {
+          throw StateError('The signed-in owner account has no user ID.');
         }
+        final ownerProfile = await FirestoreService.ensureBuiltInOwnerProfile(
+          uid: uid,
+          email: normalizedLoginId,
+        );
         profileName = ownerProfile['fullName'] as String?;
         profileMobile = ownerProfile['mobile'] as String?;
       } else if (isOwner) {
         profileName = AccountCredentials.nameForOwnerEmail(normalizedLoginId);
-        profileMobile = normalizedLoginId == AccountCredentials.ownerEmail
-            ? '09170000001'
-            : '09170000003';
+        profileMobile = AccountCredentials.mobileForOwnerEmail(
+          normalizedLoginId,
+        );
       } else {
         final credential = await FirestoreService.loginWithMobileOrEmail(
           mobileOrEmail: normalizedLoginId,
@@ -196,20 +199,23 @@ class _LoginScreenState extends State<LoginScreen> {
     } on FirebaseAuthException catch (e) {
       if (!mounted) return;
       final message = switch (e.code) {
-        'user-not-found' || 'wrong-password' || 'invalid-credential' =>
-          'Invalid credentials.',
+        'user-not-found' ||
+        'wrong-password' ||
+        'invalid-credential' => 'Invalid credentials.',
         'invalid-email' => 'Enter a valid email address.',
         _ => e.message ?? 'Login failed.',
       };
       setState(() => _submitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(message)));
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(message)));
       return;
     } catch (e) {
       if (!mounted) return;
       setState(() => _submitting = false);
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Login failed: $e')),
-      );
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text('Login failed: $e')));
       return;
     }
 

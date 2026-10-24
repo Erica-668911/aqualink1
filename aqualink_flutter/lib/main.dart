@@ -76,7 +76,10 @@ class _AquaLinkAppState extends State<AquaLinkApp> {
         try {
           final profile =
               (isOwner
-                      ? FirestoreService.loadOwnerProfile(user.uid)
+                      ? FirestoreService.ensureBuiltInOwnerProfile(
+                          uid: user.uid,
+                          email: email,
+                        )
                       : FirestoreService.loadUserProfile(user.uid))
                   .timeout(const Duration(seconds: 8));
           final data = await profile;

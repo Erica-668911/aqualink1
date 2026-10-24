@@ -43,6 +43,22 @@ void main() {
       AccountCredentials.cJoanStationName,
     );
     expect(
+      AccountCredentials.mobileForOwnerEmail(AccountCredentials.ownerEmail),
+      '09170000001',
+    );
+    expect(
+      AccountCredentials.mobileForOwnerEmail(
+        AccountCredentials.jAndPOwnerEmail,
+      ),
+      '09170000003',
+    );
+    expect(
+      AccountCredentials.mobileForOwnerEmail(
+        AccountCredentials.cJoanOwnerEmail,
+      ),
+      '09170000004',
+    );
+    expect(
       AccountCredentials.ownerPassword,
       isNot(AccountCredentials.cJoanOwnerPassword),
     );

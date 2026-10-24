@@ -137,6 +137,48 @@ class FirestoreService {
     return snapshot.data();
   }
 
+  static Future<Map<String, dynamic>> ensureBuiltInOwnerProfile({
+    required String uid,
+    required String email,
+  }) async {
+    final normalizedEmail = email.trim().toLowerCase();
+    final stationName = AccountCredentials.stationForOwnerEmail(
+      normalizedEmail,
+    );
+    if (stationName == null) {
+      throw StateError('This account is not a configured station owner.');
+    }
+
+    final ownerRef = _db.collection('owners').doc(uid);
+    final existingProfile = await loadOwnerProfile(uid);
+    final existingStation = existingProfile?['stationName'];
+    if (existingStation is String &&
+        existingStation.trim().isNotEmpty &&
+        existingStation != stationName) {
+      throw StateError('This owner account is assigned to another station.');
+    }
+
+    await ownerRef.set({
+      'uid': uid,
+      'fullName':
+          existingProfile?['fullName'] ??
+          AccountCredentials.nameForOwnerEmail(normalizedEmail),
+      'mobile':
+          existingProfile?['mobile'] ??
+          AccountCredentials.mobileForOwnerEmail(normalizedEmail),
+      'email': normalizedEmail,
+      'role': 'stationOwner',
+      'stationName': stationName,
+      'updatedAt': FieldValue.serverTimestamp(),
+    }, SetOptions(merge: true));
+
+    final profile = await loadOwnerProfile(uid);
+    if (profile == null) {
+      throw StateError('The owner profile could not be saved.');
+    }
+    return profile;
+  }
+
   static Future<void> signOut() => _auth.signOut();
 
   static Future<void> sendPasswordReset({required String email}) =>
