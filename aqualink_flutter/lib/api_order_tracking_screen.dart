@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/foundation.dart';
@@ -16,6 +15,7 @@ String trackingApiBaseUrl({
   required bool isWeb,
   required TargetPlatform platform,
 }) {
+  // Lahi ang localhost address sa Android emulator ug sa ubang platforms.
   if (isWeb) return 'http://localhost:8000';
   if (platform == TargetPlatform.android) {
     return 'http://10.0.2.2:8000';
@@ -33,6 +33,7 @@ class ApiOrderTrackingScreen extends StatefulWidget {
   final double? deliveryLongitude;
   final String? landmark;
   final String? deliveryAddress;
+  final bool isDelivery;
 
   const ApiOrderTrackingScreen({
     super.key,
@@ -45,6 +46,7 @@ class ApiOrderTrackingScreen extends StatefulWidget {
     this.deliveryLongitude,
     this.landmark,
     this.deliveryAddress,
+    this.isDelivery = true,
   });
 
   @override
@@ -61,8 +63,7 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
   TrackingData? _tracking;
   String? _currentOrderStatus;
   bool _loading = false;
-  final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
+  bool _showAddressMap = false;
 
   @override
   void initState() {
@@ -70,6 +71,7 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
     _currentOrderStatus = widget.orderStatus;
     _fetchTracking();
     if (Firebase.apps.isNotEmpty) {
+      // Maminaw sa real-time status sa Firestore ug i-refresh ang tracking kung mausab.
       _statusSubscription = FirestoreService.watchOrderStatus(widget.orderId)
           .listen((status) {
             if (status == null || !mounted) return;
@@ -88,15 +90,8 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
     }
   }
 
-  void _handleSearchSubmission(String value) {
-    final query = value.trim();
-    if (!mounted) return;
-    setState(() {
-      _searchQuery = query;
-    });
-  }
-
   Uri _trackingUri() {
+    // I-apil ang order ug delivery details aron magamit kini sa tracking API.
     final query = <String, String>{};
     if (_currentOrderStatus != null) {
       query['order_status'] = _currentOrderStatus!;
@@ -143,6 +138,7 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
         _tracking = data;
         _loading = false;
       });
+      // I-refresh matag 10 segundos aron makita ang pinakabag-ong lokasyon sa rider.
       _refreshTimer?.cancel();
       _refreshTimer = Timer.periodic(
         const Duration(seconds: 10),
@@ -159,6 +155,7 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
   }
 
   Future<void> _fetchTrackingSilently() async {
+    // Background refresh kini; dili usbon ang loading state samtang nagpakita ang screen.
     try {
       final response = await http.get(_trackingUri());
       if (response.statusCode == 200 && mounted) {
@@ -175,145 +172,174 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
   void dispose() {
     _refreshTimer?.cancel();
     _statusSubscription?.cancel();
-    _searchController.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    backgroundColor: const Color(0xFFEBF0F3),
+    backgroundColor: const Color(0xFFF5F8FA),
     appBar: AppBar(
-      backgroundColor: const Color(0xFFF3F6F7),
-      elevation: 0,
-      leading: IconButton(
-        onPressed: () => Navigator.maybePop(context),
-        icon: const Icon(Icons.arrow_back, color: Color(0xFF1D2A33)),
-      ),
-      title: Container(
-        height: 34,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-        decoration: BoxDecoration(
-          color: Colors.white,
-          borderRadius: BorderRadius.circular(18),
-          border: Border.all(color: const Color(0xFFDDE5E8)),
-        ),
-        child: Row(
+      title: const Text('Order status'),
+      backgroundColor: Colors.white,
+      surfaceTintColor: Colors.white,
+    ),
+    body: Builder(
+      builder: (context) {
+        final tracking =
+            _tracking ??
+            // Kung dili maabot ang API, gamiton ang order details isip map/status fallback.
+            TrackingData.fallback(
+              orderId: widget.orderId,
+              stationName: widget.stationName ?? 'Water Station',
+              deliveryLatitude: widget.deliveryLatitude,
+              deliveryLongitude: widget.deliveryLongitude,
+              landmark: widget.landmark,
+              deliveryAddress: widget.deliveryAddress,
+            );
+        final status =
+            _currentOrderStatus ?? _tracking?.status ?? 'No tracking yet';
+        final address =
+            (widget.isDelivery
+                    ? [widget.deliveryAddress, widget.landmark, widget.barangay]
+                    : [widget.stationName])
+                .whereType<String>()
+                .map((value) => value.trim())
+                .firstWhere(
+                  (value) => value.isNotEmpty,
+                  orElse: () => 'Address not provided',
+                );
+
+        return ListView(
+          padding: const EdgeInsets.fromLTRB(18, 18, 18, 28),
           children: [
-            const Icon(Icons.search, size: 16, color: Color(0xFF6B7A86)),
-            const SizedBox(width: 8),
-            Expanded(
-              child: TextField(
-                controller: _searchController,
-                onSubmitted: _handleSearchSubmission,
-                textInputAction: TextInputAction.search,
-                style: const TextStyle(color: Color(0xFF1D2A33), fontSize: 12),
-                decoration: const InputDecoration(
-                  hintText: 'Search location',
-                  hintStyle: TextStyle(color: Color(0xFF6B7A86), fontSize: 12),
-                  border: InputBorder.none,
-                  isDense: true,
-                  contentPadding: EdgeInsets.zero,
-                ),
+            Text(
+              'Order #${widget.orderId}',
+              style: const TextStyle(
+                color: Color(0xFF17212B),
+                fontSize: 22,
+                fontWeight: FontWeight.w800,
               ),
             ),
+            if (widget.stationName != null) ...[
+              const SizedBox(height: 4),
+              Text(
+                widget.stationName!,
+                style: const TextStyle(color: Color(0xFF71808D), fontSize: 13),
+              ),
+            ],
+            if (_loading) ...[
+              const SizedBox(height: 14),
+              const LinearProgressIndicator(minHeight: 2),
+            ] else if (_tracking == null) ...[
+              const SizedBox(height: 12),
+              Text(
+                'Live tracking details are unavailable. Showing the latest saved order status.',
+                style: TextStyle(color: Color(0xFF71808D), fontSize: 12),
+              ),
+            ],
+            const SizedBox(height: 18),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: const Color(0xFFE3EAEE)),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text(
+                    'Status timeline',
+                    style: TextStyle(
+                      color: Color(0xFF17212B),
+                      fontSize: 16,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  _StatusTimeline(
+                    status: status,
+                    estimatedDeliveryAt: _tracking?.estimatedDeliveryAt,
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 14),
+            Container(
+              padding: const EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.white,
+                border: Border.all(color: const Color(0xFFE3EAEE)),
+                borderRadius: BorderRadius.circular(14),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(
+                    Icons.location_on_outlined,
+                    color: Color(0xFF087F9D),
+                  ),
+                  const SizedBox(width: 10),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          widget.isDelivery
+                              ? 'Delivery address'
+                              : 'Pickup location',
+                          style: const TextStyle(
+                            color: Color(0xFF71808D),
+                            fontSize: 11,
+                          ),
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          address,
+                          style: const TextStyle(
+                            color: Color(0xFF17212B),
+                            fontSize: 13,
+                            fontWeight: FontWeight.w700,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            if (widget.isDelivery) ...[
+              const SizedBox(height: 8),
+              TextButton.icon(
+                onPressed: () =>
+                    setState(() => _showAddressMap = !_showAddressMap),
+                icon: Icon(
+                  _showAddressMap
+                      ? Icons.map_outlined
+                      : Icons.location_on_outlined,
+                ),
+                label: Text(
+                  _showAddressMap ? 'Hide address map' : 'Show address map',
+                ),
+              ),
+              if (_showAddressMap) ...[
+                const SizedBox(height: 8),
+                _RoutePreview(tracking: tracking),
+              ],
+            ],
+            const SizedBox(height: 16),
+            _TrackingSummary(amount: widget.orderTotal),
           ],
-        ),
-      ),
-      actions: const [
-        Padding(
-          padding: EdgeInsets.only(right: 12),
-          child: Icon(Icons.menu, size: 22, color: Color(0xFF1D2A33)),
-        ),
-      ],
+        );
+      },
     ),
-    body: _tracking == null
-        ? ListView(
-            padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
-            children: [
-              const SizedBox(height: 6),
-              _loading
-                  ? const SizedBox(
-                      height: 430,
-                      child: Center(child: CircularProgressIndicator()),
-                    )
-                  : _RoutePreview(
-                      tracking: TrackingData.fallback(
-                        orderId: widget.orderId,
-                        stationName: widget.stationName ?? 'Water Station',
-                        deliveryLatitude: widget.deliveryLatitude,
-                        deliveryLongitude: widget.deliveryLongitude,
-                        landmark: widget.landmark,
-                        deliveryAddress: widget.deliveryAddress,
-                      ),
-                      searchQuery: _searchQuery,
-                    ),
-              const SizedBox(height: 18),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Delivery Status',
-                      style: TextStyle(
-                        color: Color(0xFF17212B),
-                        fontSize: 23,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _StatusTimeline(
-                      status:
-                          _currentOrderStatus ??
-                          (_loading ? 'Pending' : 'No tracking yet'),
-                      estimatedDeliveryAt: null,
-                    ),
-                    const SizedBox(height: 18),
-                    _TrackingSummary(amount: widget.orderTotal),
-                  ],
-                ),
-              ),
-            ],
-          )
-        : ListView(
-            padding: const EdgeInsets.fromLTRB(0, 0, 0, 24),
-            children: [
-              const SizedBox(height: 6),
-              _RoutePreview(tracking: _tracking!, searchQuery: _searchQuery),
-              const SizedBox(height: 18),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 18),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    const Text(
-                      'Delivery Status',
-                      style: TextStyle(
-                        color: Color(0xFF17212B),
-                        fontSize: 23,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 12),
-                    _StatusTimeline(
-                      status: _currentOrderStatus ?? _tracking!.status,
-                      estimatedDeliveryAt: _tracking!.estimatedDeliveryAt,
-                    ),
-                    const SizedBox(height: 18),
-                    _TrackingSummary(amount: widget.orderTotal),
-                  ],
-                ),
-              ),
-            ],
-          ),
   );
 }
 
 class _RoutePreview extends StatefulWidget {
   final TrackingData tracking;
-  final String searchQuery;
 
-  const _RoutePreview({required this.tracking, required this.searchQuery});
+  const _RoutePreview({required this.tracking});
 
   @override
   State<_RoutePreview> createState() => _RoutePreviewState();
@@ -326,65 +352,24 @@ class _RoutePreviewState extends State<_RoutePreview> {
   @override
   void initState() {
     super.initState();
+    // Sugdan ang route lookup sa unang pagpakita sa map.
     _routeFuture = _loadDrivingRoute(widget.tracking);
   }
 
   @override
   void didUpdateWidget(covariant _RoutePreview oldWidget) {
     super.didUpdateWidget(oldWidget);
+    // I-recalculate ang dalan kung mausab ang station, rider, o delivery coordinates.
     if (widget.tracking.stationLocation != oldWidget.tracking.stationLocation ||
         widget.tracking.latestLocation != oldWidget.tracking.latestLocation ||
         widget.tracking.deliveryLocation !=
             oldWidget.tracking.deliveryLocation) {
       _routeFuture = _loadDrivingRoute(widget.tracking);
     }
-    if (widget.searchQuery != oldWidget.searchQuery &&
-        widget.searchQuery.isNotEmpty) {
-      _searchLocation(widget.searchQuery);
-    }
-
     final latestLocation = widget.tracking.latestLocation;
     if (latestLocation != null) {
       _mapController.move(latestLocation, _mapController.camera.zoom);
     }
-  }
-
-  Future<void> _searchLocation(String query) async {
-    final normalizedQuery = query.toLowerCase();
-    StationLocation? station;
-    for (final candidate in widget.tracking.stations) {
-      if (candidate.name.toLowerCase().contains(normalizedQuery)) {
-        station = candidate;
-        break;
-      }
-    }
-
-    LatLng? barangayLocation;
-    if (station == null) {
-      for (final entry in TrackingData.clarinBarangayCoordinates.entries) {
-        final key = entry.key.toLowerCase();
-        if (normalizedQuery.contains(key) || key.contains(normalizedQuery)) {
-          barangayLocation = entry.value;
-          break;
-        }
-      }
-    }
-
-    if (!mounted) return;
-    if (station != null) {
-      _mapController.move(station.location, 16);
-      return;
-    }
-    if (barangayLocation != null) {
-      _mapController.move(barangayLocation, 16);
-      return;
-    }
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-        content: Text('Search only includes water stations and barangays.'),
-      ),
-    );
   }
 
   @override
@@ -400,6 +385,7 @@ class _RoutePreviewState extends State<_RoutePreview> {
   }
 
   Future<List<LatLng>> _loadDrivingRoute(TrackingData tracking) async {
+    // Ang rider location mahimong waypoint aron ang route mosunod sa iyang kasamtangang posisyon.
     final waypoints = [
       tracking.stationLocation,
       if (tracking.latestLocation != null) tracking.latestLocation!,
@@ -433,13 +419,7 @@ class _RoutePreviewState extends State<_RoutePreview> {
 
   @override
   Widget build(BuildContext context) {
-    final distanceKm = widget.tracking.latestLocation == null
-        ? null
-        : _distanceInKilometers(
-            widget.tracking.latestLocation!,
-            widget.tracking.deliveryLocation,
-          );
-
+    // Ipakita sa mapa ang mga station, delivery point, ug rider kung naa nay location.
     final markers = [
       leaflet.Marker(
         point: widget.tracking.stationLocation,
@@ -515,7 +495,6 @@ class _RoutePreviewState extends State<_RoutePreview> {
               leaflet.MarkerLayer(markers: markers),
             ],
           ),
-          distanceKm: distanceKm,
           routeMessage: snapshot.connectionState == ConnectionState.waiting
               ? 'Finding a road route...'
               : snapshot.hasError
@@ -526,27 +505,7 @@ class _RoutePreviewState extends State<_RoutePreview> {
     );
   }
 
-  double _distanceInKilometers(LatLng first, LatLng second) {
-    const earthRadiusKm = 6371.0;
-    final latitudeDelta = (second.latitude - first.latitude) * math.pi / 180;
-    final longitudeDelta = (second.longitude - first.longitude) * math.pi / 180;
-    final firstLatitude = first.latitude * math.pi / 180;
-    final secondLatitude = second.latitude * math.pi / 180;
-    final haversine =
-        math.pow(math.sin(latitudeDelta / 2), 2) +
-        math.cos(firstLatitude) *
-            math.cos(secondLatitude) *
-            math.pow(math.sin(longitudeDelta / 2), 2);
-    return earthRadiusKm *
-        2 *
-        math.atan2(math.sqrt(haversine), math.sqrt(1 - haversine));
-  }
-
-  Widget _buildMapShell(
-    Widget map, {
-    double? distanceKm,
-    String? routeMessage,
-  }) => Container(
+  Widget _buildMapShell(Widget map, {String? routeMessage}) => Container(
     height: 430,
     decoration: const BoxDecoration(color: Color(0xFFECEFF1)),
     child: Stack(
@@ -556,7 +515,7 @@ class _RoutePreviewState extends State<_RoutePreview> {
           top: 14,
           left: 20,
           child: Text(
-            widget.searchQuery.isEmpty ? 'Water stations' : widget.searchQuery,
+            'Address map',
             style: const TextStyle(
               color: Color(0xFF5D6B72),
               fontSize: 11,
@@ -591,13 +550,11 @@ class _RoutePreviewState extends State<_RoutePreview> {
           right: 12,
           bottom: 12,
           child: _DeliveryInfoPanel(
-            riderName: widget.tracking.displayRiderName,
             stationName: widget.tracking.stationName,
-            landmark:
+            address:
                 widget.tracking.deliveryAddress ??
                 widget.tracking.deliveryLandmark ??
                 'Clarin, Bohol',
-            distanceKm: distanceKm,
           ),
         ),
         Positioned(
@@ -650,17 +607,10 @@ class _RoutePreviewState extends State<_RoutePreview> {
 }
 
 class _DeliveryInfoPanel extends StatelessWidget {
-  final String riderName;
   final String stationName;
-  final String landmark;
-  final double? distanceKm;
+  final String address;
 
-  const _DeliveryInfoPanel({
-    required this.riderName,
-    required this.stationName,
-    required this.landmark,
-    required this.distanceKm,
-  });
+  const _DeliveryInfoPanel({required this.stationName, required this.address});
 
   @override
   Widget build(BuildContext context) => DecoratedBox(
@@ -682,13 +632,6 @@ class _DeliveryInfoPanel extends StatelessWidget {
         mainAxisSize: MainAxisSize.min,
         children: [
           _InfoRow(
-            icon: Icons.local_shipping,
-            color: const Color(0xFF27AE60),
-            label: 'Delivery rider',
-            value: riderName,
-          ),
-          const Divider(height: 12),
-          _InfoRow(
             icon: Icons.location_on,
             color: const Color(0xFFE74C3C),
             label: 'Station',
@@ -698,8 +641,8 @@ class _DeliveryInfoPanel extends StatelessWidget {
           _InfoRow(
             icon: Icons.flag,
             color: const Color(0xFFE74C3C),
-            label: 'Delivery location',
-            value: landmark,
+            label: 'Address',
+            value: address,
           ),
         ],
       ),
@@ -756,8 +699,14 @@ class _StatusTimeline extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final normalized = status.trim().toLowerCase();
+    // Ibulag ang cancelled/rejected ug completed orders gikan sa normal nga timeline.
+    final isCancelled =
+        normalized == 'cancelled' ||
+        normalized == 'canceled' ||
+        normalized == 'rejected';
     final isComplete =
         normalized.contains('completed') || normalized.contains('delivered');
+    // I-convert ang status text ngadto sa index sa katapusang aktibong timeline step.
     final activeStep = isComplete
         ? 4
         : normalized.contains('delivery')
@@ -766,9 +715,23 @@ class _StatusTimeline extends StatelessWidget {
         ? 2
         : normalized.contains('accept')
         ? 1
-        : 0;
+        : normalized.contains('pending')
+        ? 0
+        : -1;
+    if (isCancelled) {
+      final label = normalized == 'rejected' ? 'Rejected' : 'Cancelled';
+      return _StatusStep(
+        title: label,
+        detail: 'This order will not continue.',
+        icon: Icons.close,
+        active: true,
+        last: true,
+        color: const Color(0xFFD64545),
+      );
+    }
+
     const steps = [
-      ('Pending', Icons.check),
+      ('Order received', Icons.receipt_long_outlined),
       ('Accepted', Icons.check),
       ('Preparing', Icons.inventory_2_outlined),
       ('Out for Delivery', Icons.two_wheeler_outlined),
@@ -781,7 +744,7 @@ class _StatusTimeline extends StatelessWidget {
             title: steps[index].$1,
             detail: _detailForStep(index, activeStep, isComplete),
             icon: steps[index].$2,
-            active: index <= activeStep,
+            active: activeStep >= 0 && index <= activeStep,
             last: index == steps.length - 1,
           ),
       ],
@@ -789,13 +752,14 @@ class _StatusTimeline extends StatelessWidget {
   }
 
   String _detailForStep(int index, int activeStep, bool isComplete) {
-    if (index < activeStep) return 'Completed';
-    if (index > activeStep) return 'Pending';
-    if (index == 4 && isComplete) return 'Delivered';
+    if (activeStep < 0) return 'Waiting for an update';
+    if (index < activeStep) return 'Complete';
+    if (index == 4 && isComplete) return 'Complete';
     if (index == 4 && estimatedDeliveryAt != null) {
-      return 'Delivered ${_formatDateTime(estimatedDeliveryAt!)}';
+      return 'Estimated ${_formatDateTime(estimatedDeliveryAt!)}';
     }
-    if (index == 4) return 'Not scheduled yet';
+    if (index > activeStep) return 'Not started';
+    if (index == 4) return 'No estimate yet';
     return 'Current status';
   }
 
@@ -818,6 +782,7 @@ class _StatusStep extends StatelessWidget {
   final IconData icon;
   final bool active;
   final bool last;
+  final Color? color;
 
   const _StatusStep({
     required this.title,
@@ -825,6 +790,7 @@ class _StatusStep extends StatelessWidget {
     required this.icon,
     required this.active,
     required this.last,
+    this.color,
   });
 
   @override
@@ -840,7 +806,7 @@ class _StatusStep extends StatelessWidget {
               CircleAvatar(
                 radius: 18,
                 backgroundColor: active
-                    ? const Color(0xFF087F9D)
+                    ? (color ?? const Color(0xFF087F9D))
                     : const Color(0xFFEAF0F4),
                 child: Icon(
                   icon,
@@ -853,7 +819,7 @@ class _StatusStep extends StatelessWidget {
                   child: Container(
                     width: 2,
                     color: active
-                        ? const Color(0xFF087F9D)
+                        ? (color ?? const Color(0xFF087F9D))
                         : const Color(0xFFDDE5EC),
                   ),
                 ),
@@ -900,37 +866,28 @@ class _TrackingSummary extends StatelessWidget {
   const _TrackingSummary({required this.amount});
 
   @override
-  Widget build(BuildContext context) => Card(
-    margin: EdgeInsets.zero,
-    elevation: 0,
-    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-    child: Padding(
-      padding: EdgeInsets.all(13),
-      child: Row(
-        children: [
-          Icon(Icons.location_on_outlined, color: Color(0xFF087F9D)),
-          SizedBox(width: 10),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  'Delivering to',
-                  style: TextStyle(fontSize: 10, color: Color(0xFF71808D)),
+  Widget build(BuildContext context) {
+    if (amount == null) return const SizedBox.shrink();
+    return Card(
+      margin: EdgeInsets.zero,
+      elevation: 0,
+      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      child: Padding(
+        padding: const EdgeInsets.all(13),
+        child: Row(
+          children: [
+            const Icon(Icons.receipt_long_outlined, color: Color(0xFF087F9D)),
+            const SizedBox(width: 10),
+            const Expanded(
+              child: Text(
+                'Order total',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: Color(0xFF71808D),
                 ),
-                SizedBox(height: 3),
-                Text(
-                  'Your delivery address',
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w800,
-                    color: Color(0xFF17212B),
-                  ),
-                ),
-              ],
+              ),
             ),
-          ),
-          if (amount != null)
             Text(
               'P$amount',
               style: const TextStyle(
@@ -939,10 +896,11 @@ class _TrackingSummary extends StatelessWidget {
                 color: Color(0xFF17212B),
               ),
             ),
-        ],
+          ],
+        ),
       ),
-    ),
-  );
+    );
+  }
 }
 
 class LocationPoint {
@@ -1035,6 +993,7 @@ class TrackingData {
     required double? deliveryLatitude,
     required double? deliveryLongitude,
   }) {
+    // Unahon ang eksaktong GPS; kung wala, pangitaon ang barangay pinaagi sa landmark.
     if (deliveryLatitude != null && deliveryLongitude != null) {
       return LatLng(deliveryLatitude, deliveryLongitude);
     }
@@ -1062,6 +1021,7 @@ class TrackingData {
     required String? landmark,
     required String? deliveryAddress,
   }) {
+    // Gamiton kining lokal nga coordinates aron magpabilin nga magamit ang map bisan walay API data.
     final stationPoint = stationName.toLowerCase().contains('remoreras')
         ? const LatLng(9.9547, 124.0084)
         : stationName.toLowerCase().contains('j&p')
@@ -1105,6 +1065,7 @@ class TrackingData {
     required String? stationName,
     required LatLng? reportedLocation,
   }) {
+    // I-prioritize ang coordinates nga na-define para sa nailhang stations.
     final normalizedName = stationName?.toLowerCase() ?? '';
     if (normalizedName.contains('remoreras')) {
       return const LatLng(9.9547, 124.0084);
@@ -1118,6 +1079,7 @@ class TrackingData {
     return reportedLocation ?? const LatLng(9.9547, 124.0084);
   }
 
+  // I-convert ang API response ngadto sa typed tracking model nga gamiton sa screen.
   factory TrackingData.fromJson(Map<String, dynamic> json) => TrackingData(
     orderId: json['order_id'] as String,
     trackingCode: json['tracking_code'] as String,

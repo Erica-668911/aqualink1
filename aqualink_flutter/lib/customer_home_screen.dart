@@ -166,7 +166,7 @@ class _CustomerDashboard extends StatelessWidget {
                       subtitle: Text('$status  •  P${order.total}'),
                       trailing: canTrack
                           ? IconButton(
-                              tooltip: 'Track order',
+                              tooltip: 'View order status',
                               icon: const Icon(Icons.location_searching),
                               onPressed: () {
                                 Navigator.pop(dialogContext);
@@ -176,6 +176,9 @@ class _CustomerDashboard extends StatelessWidget {
                                       orderId: order.number,
                                       orderTotal: order.total,
                                       stationName: order.station,
+                                      isDelivery:
+                                          order.fulfillmentMethod ==
+                                          FulfillmentMethod.delivery,
                                       orderStatus: order.status.name,
                                       barangay: order.barangay,
                                       deliveryLatitude: order.deliveryLatitude,
@@ -658,6 +661,9 @@ class _OrderCard extends StatelessWidget {
           orderId: order.number,
           orderTotal: order.sourceOrder?.total,
           stationName: order.station,
+          isDelivery:
+              order.sourceOrder?.fulfillmentMethod ==
+              FulfillmentMethod.delivery,
           orderStatus: order.status.toLowerCase(),
           barangay: order.sourceOrder?.barangay,
           deliveryLatitude: order.sourceOrder?.deliveryLatitude,
@@ -783,7 +789,7 @@ class _OrderCard extends StatelessWidget {
           child: TextButton.icon(
             onPressed: () => _track(context),
             icon: const Icon(Icons.location_searching, size: 16),
-            label: const Text('Track order'),
+            label: const Text('View status'),
           ),
         ),
         if (order.sourceOrder?.status == OrderStatus.pending) ...[
@@ -977,7 +983,7 @@ class _CustomerProfile extends StatelessWidget {
           onTap: () => _showInfo(
             context,
             'Help & Support',
-            'For help with an order, open Orders and select Track order. You can also contact your water station directly from its details.',
+            'For an order update, open Orders and select View status. You can also contact your water station directly from its details.',
           ),
         ),
         _ProfileOption(

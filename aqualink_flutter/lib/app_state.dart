@@ -8,6 +8,7 @@ final _orderIdRandom = Random.secure();
 
 enum AccountRole { customer, stationOwner }
 
+// Summary nga ipakita sa station owner para sa orders ug sales karong adlawa.
 class OwnerDailySummary {
   final int newOrders;
   final int activeOrders;
@@ -34,6 +35,7 @@ class AccountCredentials {
   static const cJoanStationName = 'CJoan Water Station';
   static const retiredAdminEmail = 'admin@aqualink.com';
 
+  // Kining lookup helpers mo-return og null kung dili rehistradong station owner ang email.
   static String? stationForOwnerEmail(String email) =>
       switch (email.trim().toLowerCase()) {
         ownerEmail => ownerStationName,
@@ -68,6 +70,7 @@ class AccountCredentials {
 }
 
 class AppState extends ChangeNotifier {
+  // Shared app data; ang notifyListeners() mopahibalo sa mga screen nga nagbasa niini.
   bool isLoggedIn = false;
   AccountRole accountRole = AccountRole.customer;
   String? fullName;
@@ -118,6 +121,7 @@ class AppState extends ChangeNotifier {
       incomingOrders.where((order) => order.station == stationName).toList();
 
   OwnerDailySummary ownerDailySummary(String stationName, {DateTime? now}) {
+    // I-filter ang orders sa station ug petsa karon aron makwenta ang dashboard totals.
     final today = (now ?? DateTime.now()).toLocal();
     bool isToday(DateTime? value) {
       final date = value?.toLocal();
@@ -159,6 +163,7 @@ class AppState extends ChangeNotifier {
     String stationName,
     List<WaterOrder> orders,
   ) {
+    // Ilisan lang ang orders sa maong station aron dili maapektuhan ang ubang stations.
     incomingOrders.removeWhere((order) => order.station == stationName);
     incomingOrders.addAll(
       orders.where((order) => order.station == stationName),
@@ -172,6 +177,7 @@ class AppState extends ChangeNotifier {
   }
 
   void replaceCustomerOrders(List<WaterOrder> customerOrders) {
+    // Ilisan ang customer order snapshot ug ipakita ang pinakabag-o sa ibabaw.
     orders
       ..clear()
       ..addAll(customerOrders);
@@ -203,6 +209,7 @@ class AppState extends ChangeNotifier {
   }) {
     stationDetails[stationName] = details;
     if (details.name != stationName) {
+      // Ibalhin ang products uban sa station kung giusab ang station name.
       stationDetails[details.name] = details;
       final products = stationProducts.remove(stationName);
       if (products != null) stationProducts[details.name] = products;
@@ -241,6 +248,7 @@ class AppState extends ChangeNotifier {
     required int price,
     int quantity = 1,
   }) {
+    // Kung naa na ang produkto sa cart, idugang ang quantity imbis maghimo og duplicate.
     final existingIndex = cart.indexWhere(
       (item) => item.productName == productName,
     );
@@ -276,6 +284,7 @@ class AppState extends ChangeNotifier {
     double? deliveryLatitude,
     double? deliveryLongitude,
   }) {
+    // Ibulag ang paghimo sa order ug ang pagrekord niini aron magamit ang duha ka lakang.
     final order = prepareOrder(
       station: station,
       fulfillmentMethod: fulfillmentMethod,
@@ -304,6 +313,7 @@ class AppState extends ChangeNotifier {
       throw StateError('Add at least one product before submitting an order.');
     }
     final items = List<CartItem>.unmodifiable(cart);
+    // Timestamp ug random suffix aron makabuo og order number nga dili dali magbangga.
     final timestamp = DateTime.now().microsecondsSinceEpoch.toRadixString(36);
     final randomSuffix = _orderIdRandom
         .nextInt(0x7fffffff)
@@ -343,6 +353,7 @@ class AppState extends ChangeNotifier {
   }
 
   void recordSubmittedOrder(WaterOrder order) {
+    // Idugang sa customer ug station lists, dayon haw-asan ang cart human ma-record.
     orders.removeWhere((existing) => existing.number == order.number);
     incomingOrders.removeWhere((existing) => existing.number == order.number);
     orders.insert(0, order);
@@ -356,6 +367,7 @@ class AppState extends ChangeNotifier {
     required OrderStatus status,
     String? reason,
   }) {
+    // Kinahanglan og rason ang rejection/cancellation ug pending ra ang puwedeng ma-accept/reject.
     if ((status == OrderStatus.rejected || status == OrderStatus.cancelled) &&
         (reason == null || reason.trim().isEmpty)) {
       return false;
@@ -417,6 +429,7 @@ class AppState extends ChangeNotifier {
     String? fullName,
     String? mobile,
   }) {
+    // Pun-on ang profile gamit ang gihatag nga impormasyon ug fallback name kung walay ngalan.
     isLoggedIn = true;
     accountRole = role;
     this.stationName = stationName;
@@ -447,6 +460,7 @@ class AppState extends ChangeNotifier {
   }
 
   Future<String?> useCurrentLocation() async {
+    // Susiha una ang location service ug permission sa dili pa kuhaon ang GPS coordinates.
     final serviceEnabled = await Geolocator.isLocationServiceEnabled();
     if (!serviceEnabled) return 'Location services are disabled.';
 
@@ -470,6 +484,7 @@ class AppState extends ChangeNotifier {
   }
 
   void logout() {
+    // I-reset ang session-specific data aron walay mabilin nga cart/profile sa sunod login.
     isLoggedIn = false;
     accountRole = AccountRole.customer;
     fullName = null;
@@ -489,6 +504,7 @@ class AppScope extends InheritedNotifier<AppState> {
     : super(notifier: state);
 
   static AppState of(BuildContext context) {
+    // Kuhaa ang shared AppState gikan sa widget tree ug paminawa ang mga kausaban niini.
     final scope = context.dependOnInheritedWidgetOfExactType<AppScope>();
     assert(scope != null, 'AppScope is missing from the widget tree.');
     return scope!.notifier!;
