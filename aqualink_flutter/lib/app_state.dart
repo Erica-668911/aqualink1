@@ -398,6 +398,73 @@ class AppState extends ChangeNotifier {
     return true;
   }
 
+  bool updateOrderItemStatus({
+    required String number,
+    required int itemIndex,
+    required OrderItemStatus status,
+    String? reason,
+  }) {
+    if (status == OrderItemStatus.pending ||
+        (status == OrderItemStatus.rejected &&
+            (reason == null || reason.trim().isEmpty))) {
+      return false;
+    }
+
+    final orderIndex = orders.indexWhere((order) => order.number == number);
+    final incomingIndex = incomingOrders.indexWhere(
+      (order) => order.number == number,
+    );
+    if (orderIndex == -1 && incomingIndex == -1) return false;
+
+    final currentOrder = orderIndex != -1
+        ? orders[orderIndex]
+        : incomingOrders[incomingIndex];
+    if (currentOrder.status != OrderStatus.pending ||
+        itemIndex < 0 ||
+        itemIndex >= currentOrder.items.length ||
+        currentOrder.items[itemIndex].decisionStatus !=
+            OrderItemStatus.pending) {
+      return false;
+    }
+
+    final updatedItems = List<CartItem>.of(currentOrder.items);
+    updatedItems[itemIndex] = updatedItems[itemIndex].copyWith(
+      decisionStatus: status,
+      decisionReason: status == OrderItemStatus.rejected
+          ? reason!.trim()
+          : null,
+    );
+    final hasPendingItems = updatedItems.any(
+      (item) => item.decisionStatus == OrderItemStatus.pending,
+    );
+    final hasAcceptedItems = updatedItems.any(
+      (item) => item.decisionStatus == OrderItemStatus.accepted,
+    );
+    final hasAvailableItems = updatedItems.any(
+      (item) => item.decisionStatus != OrderItemStatus.rejected,
+    );
+    final updatedOrder = currentOrder.copyWith(
+      items: List<CartItem>.unmodifiable(updatedItems),
+      total:
+          updatedItems
+              .where((item) => item.decisionStatus != OrderItemStatus.rejected)
+              .fold(0, (total, item) => total + item.price * item.quantity) +
+          (hasAvailableItems &&
+                  currentOrder.fulfillmentMethod == FulfillmentMethod.delivery
+              ? currentOrder.deliveryFee
+              : 0),
+      status: hasPendingItems
+          ? OrderStatus.pending
+          : hasAcceptedItems
+          ? OrderStatus.accepted
+          : OrderStatus.rejected,
+    );
+    if (orderIndex != -1) orders[orderIndex] = updatedOrder;
+    if (incomingIndex != -1) incomingOrders[incomingIndex] = updatedOrder;
+    notifyListeners();
+    return true;
+  }
+
   void register({
     required String fullName,
     required String mobile,

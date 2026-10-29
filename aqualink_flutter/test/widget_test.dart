@@ -3,6 +3,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_application_1/api_order_tracking_screen.dart';
 import 'package:flutter_application_1/app_state.dart';
 import 'package:flutter_application_1/customer_home_screen.dart';
+import 'package:flutter_application_1/home_screen.dart';
 import 'package:flutter_application_1/main.dart';
 import 'package:flutter_application_1/models/models.dart';
 
@@ -296,6 +297,64 @@ void main() {
     expect(state.orders.single.completedAt, isNotNull);
   });
 
+  test('station can reject one product without rejecting the whole order', () {
+    final state = AppState();
+    state.addToCart(productName: 'Mineral Water (2.5 Gal)', price: 15);
+    state.updateCartQuantity('Mineral Water (2.5 Gal)', 2);
+    state.addToCart(productName: 'Mineral Water (5 Gal)', price: 25);
+    final order = state.submitOrder(
+      station: AccountCredentials.ownerStationName,
+      fulfillmentMethod: FulfillmentMethod.delivery,
+      deliveryFee: 30,
+    );
+
+    expect(
+      state.updateOrderItemStatus(
+        number: order.number,
+        itemIndex: 0,
+        status: OrderItemStatus.rejected,
+      ),
+      isFalse,
+    );
+    expect(
+      state.updateOrderItemStatus(
+        number: order.number,
+        itemIndex: 0,
+        status: OrderItemStatus.rejected,
+        reason: 'Out of stock',
+      ),
+      isTrue,
+    );
+
+    final partiallyDecidedOrder = state.orders.single;
+    expect(partiallyDecidedOrder.status, OrderStatus.pending);
+    expect(
+      partiallyDecidedOrder.items[0].decisionStatus,
+      OrderItemStatus.rejected,
+    );
+    expect(partiallyDecidedOrder.items[0].decisionReason, 'Out of stock');
+    expect(
+      partiallyDecidedOrder.items[1].decisionStatus,
+      OrderItemStatus.pending,
+    );
+    expect(partiallyDecidedOrder.total, 55);
+
+    expect(
+      state.updateOrderItemStatus(
+        number: order.number,
+        itemIndex: 1,
+        status: OrderItemStatus.accepted,
+      ),
+      isTrue,
+    );
+    final finalOrder = state.orders.single;
+    expect(finalOrder.status, OrderStatus.accepted);
+    expect(finalOrder.isPartiallyAccepted, isTrue);
+    expect(finalOrder.total, 55);
+    expect(finalOrder.items[0].decisionStatus, OrderItemStatus.rejected);
+    expect(finalOrder.items[1].decisionStatus, OrderItemStatus.accepted);
+  });
+
   test('incoming orders stay empty until a real customer submits one', () {
     final state = AppState();
 
@@ -465,6 +524,50 @@ void main() {
       );
     },
   );
+
+  testWidgets('order status screen shows the products and quantities ordered', (
+    tester,
+  ) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: ApiOrderTrackingScreen(
+          orderId: 'WG-TEST-ORDER',
+          orderTotal: 55,
+          stationName: 'Remoreras Water Refilling',
+          orderStatus: 'accepted',
+          isDelivery: false,
+          orderItems: [
+            CartItem(
+              productName: 'Mineral Water (2.5 Gal)',
+              price: 15,
+              quantity: 2,
+              decisionStatus: OrderItemStatus.rejected,
+              decisionReason: 'Out of stock',
+            ),
+            CartItem(
+              productName: 'Mineral Water (5 Gal)',
+              price: 25,
+              quantity: 1,
+              decisionStatus: OrderItemStatus.accepted,
+            ),
+          ],
+        ),
+      ),
+    );
+
+    expect(find.text('Items ordered'), findsOneWidget);
+    expect(find.text('2 x Mineral Water (2.5 Gal)'), findsOneWidget);
+    expect(find.text('1 x Mineral Water (5 Gal)'), findsOneWidget);
+    expect(find.text('Reason: Out of stock'), findsOneWidget);
+    expect(find.text('P30'), findsOneWidget);
+    expect(find.text('P25'), findsOneWidget);
+    await tester.scrollUntilVisible(
+      find.text('Order total'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+    expect(find.text('P55'), findsOneWidget);
+  });
 
   test('tracking rider label matches its station brand', () {
     final aquaPureTracking = TrackingData.fallback(
@@ -640,6 +743,89 @@ void main() {
     expect(find.text('My Orders'), findsOneWidget);
     expect(find.text('All'), findsOneWidget);
     expect(find.textContaining('WG-'), findsNothing);
+    expect(find.text('No orders yet.'), findsOneWidget);
+  });
+
+  testWidgets('customer order tabs show every matching order status', (
+    tester,
+  ) async {
+    final state = AppState();
+    state.login(
+      mobileOrEmail: '09170000003',
+      role: AccountRole.customer,
+      fullName: 'Customer User',
+    );
+
+    WaterOrder addOrder(String productName) {
+      state.addToCart(productName: productName, price: 25);
+      return state.submitOrder(
+        station: AccountCredentials.ownerStationName,
+        fulfillmentMethod: FulfillmentMethod.pickup,
+      );
+    }
+
+    final pending = addOrder('Pending order');
+    final accepted = addOrder('Accepted order');
+    state.updateOrderStatus(
+      number: accepted.number,
+      status: OrderStatus.accepted,
+    );
+    final completed = addOrder('Completed order');
+    state.updateOrderStatus(
+      number: completed.number,
+      status: OrderStatus.accepted,
+    );
+    state.updateOrderStatus(
+      number: completed.number,
+      status: OrderStatus.completed,
+    );
+    final delivered = addOrder('Delivered order');
+    state.updateOrderStatus(
+      number: delivered.number,
+      status: OrderStatus.delivered,
+    );
+    final cancelled = addOrder('Cancelled order');
+    state.updateOrderStatus(
+      number: cancelled.number,
+      status: OrderStatus.cancelled,
+      reason: 'Customer changed their mind',
+    );
+    final rejected = addOrder('Rejected order');
+    state.updateOrderStatus(
+      number: rejected.number,
+      status: OrderStatus.rejected,
+      reason: 'Product unavailable',
+    );
+
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: const MaterialApp(home: CustomerHomeScreen()),
+      ),
+    );
+    await tester.tap(find.text('Orders'));
+    await tester.pumpAndSettle();
+
+    await tester.tap(find.text('Active'));
+    await tester.pumpAndSettle();
+    expect(find.text(pending.number), findsOneWidget);
+    expect(find.text(accepted.number), findsOneWidget);
+    expect(find.text(completed.number), findsNothing);
+    expect(find.text(delivered.number), findsNothing);
+    expect(find.text(cancelled.number), findsNothing);
+    expect(find.text(rejected.number), findsNothing);
+
+    await tester.tap(find.text('Completed'));
+    await tester.pumpAndSettle();
+    expect(find.text(completed.number), findsOneWidget);
+    expect(find.text(delivered.number), findsOneWidget);
+    expect(find.text(pending.number), findsNothing);
+
+    await tester.tap(find.text('Cancelled'));
+    await tester.pumpAndSettle();
+    expect(find.text(cancelled.number), findsOneWidget);
+    expect(find.text(rejected.number), findsOneWidget);
+    expect(find.text(completed.number), findsNothing);
   });
 
   testWidgets('customer opens the orders tab without any tracking actions', (
@@ -694,6 +880,111 @@ void main() {
     expect(find.text('Manage your station details'), findsOneWidget);
   });
 
+  testWidgets('owner dashboard lists rejected products for its station', (
+    tester,
+  ) async {
+    final state = AppState();
+    state.login(
+      mobileOrEmail: AccountCredentials.ownerEmail,
+      role: AccountRole.stationOwner,
+      stationName: AccountCredentials.ownerStationName,
+    );
+    state.addToCart(productName: 'Mineral Water (2.5 Gal)', price: 15);
+    state.updateCartQuantity('Mineral Water (2.5 Gal)', 2);
+    final rejectedOrder = state.submitOrder(
+      station: AccountCredentials.ownerStationName,
+      fulfillmentMethod: FulfillmentMethod.pickup,
+    );
+    state.updateOrderItemStatus(
+      number: rejectedOrder.number,
+      itemIndex: 0,
+      status: OrderItemStatus.rejected,
+      reason: 'Out of stock',
+    );
+
+    state.addToCart(productName: 'Mineral Water (5 Gal)', price: 25);
+    final otherStationOrder = state.submitOrder(
+      station: AccountCredentials.jAndPStationName,
+      fulfillmentMethod: FulfillmentMethod.pickup,
+    );
+    state.updateOrderItemStatus(
+      number: otherStationOrder.number,
+      itemIndex: 0,
+      status: OrderItemStatus.rejected,
+      reason: 'Other station product',
+    );
+
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+    await tester.scrollUntilVisible(
+      find.text('REJECTED PRODUCTS'),
+      300,
+      scrollable: find.byType(Scrollable).first,
+    );
+
+    expect(find.text('REJECTED PRODUCTS'), findsOneWidget);
+    expect(find.text('1 product'), findsOneWidget);
+    expect(find.text('2 x Mineral Water (2.5 Gal)'), findsOneWidget);
+    expect(find.textContaining('Reason: Out of stock'), findsOneWidget);
+    expect(find.textContaining('Other station product'), findsNothing);
+  });
+
+  testWidgets('station owner rejects only the unavailable product', (
+    tester,
+  ) async {
+    final state = AppState();
+    state.login(
+      mobileOrEmail: AccountCredentials.ownerEmail,
+      role: AccountRole.stationOwner,
+      stationName: AccountCredentials.ownerStationName,
+    );
+    state.addToCart(productName: 'Mineral Water (2.5 Gal)', price: 15);
+    state.addToCart(productName: 'Mineral Water (5 Gal)', price: 25);
+    final order = state.submitOrder(
+      station: AccountCredentials.ownerStationName,
+      fulfillmentMethod: FulfillmentMethod.pickup,
+    );
+    await tester.pumpWidget(
+      AppScope(
+        state: state,
+        child: const MaterialApp(home: HomeScreen()),
+      ),
+    );
+
+    await tester.tap(find.text('Orders').last);
+    await tester.pumpAndSettle();
+    expect(find.text('Accept product'), findsNWidgets(2));
+    expect(find.text('Reject product'), findsNWidgets(2));
+    expect(
+      find.widgetWithText(FilledButton, 'Accept product'),
+      findsNWidgets(2),
+    );
+    expect(
+      find.widgetWithText(FilledButton, 'Reject product'),
+      findsNWidgets(2),
+    );
+
+    await tester.tap(find.text('Reject product').first);
+    await tester.pumpAndSettle();
+    await tester.enterText(find.byType(TextField), 'Out of stock');
+    await tester.tap(find.text('Reject product').last);
+    await tester.pumpAndSettle();
+
+    final updatedOrder = state.incomingOrders.single;
+    expect(updatedOrder.number, order.number);
+    expect(updatedOrder.status, OrderStatus.pending);
+    expect(updatedOrder.items[0].decisionStatus, OrderItemStatus.rejected);
+    expect(updatedOrder.items[1].decisionStatus, OrderItemStatus.pending);
+    expect(find.text('2 x Mineral Water (2.5 Gal)'), findsNothing);
+    expect(find.text('1 x Mineral Water (5 Gal)'), findsOneWidget);
+    expect(find.textContaining('Reason: Out of stock'), findsNothing);
+    expect(find.text('Reject product'), findsOneWidget);
+  });
+
   testWidgets('station owner can open the add product form', (tester) async {
     await tester.pumpWidget(const AquaLinkApp());
 
@@ -704,6 +995,8 @@ void main() {
     await tester.pumpAndSettle();
     await tester.tap(find.text('Products'));
     await tester.pumpAndSettle();
+    expect(find.byTooltip('Add product'), findsNothing);
+    expect(find.byIcon(Icons.add_circle_outline), findsNothing);
     await tester.tap(find.text('Add Product').last);
     await tester.pumpAndSettle();
 

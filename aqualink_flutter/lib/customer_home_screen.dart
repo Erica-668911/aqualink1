@@ -148,9 +148,10 @@ class _CustomerDashboard extends StatelessWidget {
                 child: ListView(
                   shrinkWrap: true,
                   children: orders.map((order) {
-                    final status =
-                        order.status.name[0].toUpperCase() +
-                        order.status.name.substring(1);
+                    final status = order.isPartiallyAccepted
+                        ? 'Partially accepted'
+                        : order.status.name[0].toUpperCase() +
+                              order.status.name.substring(1);
                     final canTrack =
                         order.status != OrderStatus.cancelled &&
                         order.status != OrderStatus.rejected;
@@ -175,6 +176,7 @@ class _CustomerDashboard extends StatelessWidget {
                                     builder: (_) => ApiOrderTrackingScreen(
                                       orderId: order.number,
                                       orderTotal: order.total,
+                                      orderItems: order.items,
                                       stationName: order.station,
                                       isDelivery:
                                           order.fulfillmentMethod ==
@@ -525,6 +527,22 @@ class _CustomerOrdersState extends State<_CustomerOrders> {
   Widget build(BuildContext context) {
     final state = AppScope.of(context);
     final orders = state.orders.map(_OrderData.fromOrder).toList();
+    final filteredOrders = orders
+        .where(
+          (order) => switch (_selectedFilter) {
+            'Active' =>
+              order.orderStatus == OrderStatus.pending ||
+                  order.orderStatus == OrderStatus.accepted,
+            'Completed' =>
+              order.orderStatus == OrderStatus.completed ||
+                  order.orderStatus == OrderStatus.delivered,
+            'Cancelled' =>
+              order.orderStatus == OrderStatus.cancelled ||
+                  order.orderStatus == OrderStatus.rejected,
+            _ => true,
+          },
+        )
+        .toList();
     return _CustomerScaffold(
       title: 'My Orders',
       child: ListView(
@@ -536,16 +554,20 @@ class _CustomerOrdersState extends State<_CustomerOrders> {
                 setState(() => _selectedFilter = filter),
           ),
           const SizedBox(height: 15),
-          ...orders
-              .where(
-                (order) =>
-                    _selectedFilter == 'All' ||
-                    (_selectedFilter == 'Active'
-                        ? order.status == 'Accepted' ||
-                              order.status == 'Delivered'
-                        : order.status == _selectedFilter),
-              )
-              .map((order) => _OrderCard(order: order)),
+          if (filteredOrders.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 28),
+              child: Center(
+                child: Text(
+                  _selectedFilter == 'All'
+                      ? 'No orders yet.'
+                      : 'No ${_selectedFilter.toLowerCase()} orders yet.',
+                  style: const TextStyle(fontSize: 12, color: _muted),
+                ),
+              ),
+            )
+          else
+            ...filteredOrders.map((order) => _OrderCard(order: order)),
         ],
       ),
     );
@@ -623,6 +645,7 @@ class _TabPill extends StatelessWidget {
 
 class _OrderData {
   final String number, station, status, amount;
+  final OrderStatus orderStatus;
   final String? reason;
   final String fulfillment;
   final WaterOrder? sourceOrder;
@@ -631,6 +654,7 @@ class _OrderData {
     required this.number,
     required this.station,
     required this.status,
+    required this.orderStatus,
     required this.amount,
     this.reason,
     this.fulfillment = 'Delivery',
@@ -640,7 +664,10 @@ class _OrderData {
   factory _OrderData.fromOrder(WaterOrder order) => _OrderData(
     number: order.number,
     station: order.station,
-    status: order.status.name[0].toUpperCase() + order.status.name.substring(1),
+    orderStatus: order.status,
+    status: order.isPartiallyAccepted
+        ? 'Partially accepted'
+        : order.status.name[0].toUpperCase() + order.status.name.substring(1),
     amount: 'P${order.total}',
     reason: order.reason,
     fulfillment: order.fulfillmentMethod == FulfillmentMethod.delivery
@@ -660,11 +687,13 @@ class _OrderCard extends StatelessWidget {
         builder: (_) => ApiOrderTrackingScreen(
           orderId: order.number,
           orderTotal: order.sourceOrder?.total,
+          orderItems: order.sourceOrder?.items ?? const [],
           stationName: order.station,
           isDelivery:
               order.sourceOrder?.fulfillmentMethod ==
               FulfillmentMethod.delivery,
-          orderStatus: order.status.toLowerCase(),
+          orderStatus:
+              order.sourceOrder?.status.name ?? order.status.toLowerCase(),
           barangay: order.sourceOrder?.barangay,
           deliveryLatitude: order.sourceOrder?.deliveryLatitude,
           deliveryLongitude: order.sourceOrder?.deliveryLongitude,
@@ -744,6 +773,8 @@ class _OrderCard extends StatelessWidget {
                 fontSize: 9,
                 color: order.status == 'Cancelled' || order.status == 'Rejected'
                     ? Colors.red
+                    : order.status == 'Partially accepted'
+                    ? Colors.orange.shade800
                     : const Color(0xFF009B70),
                 fontWeight: FontWeight.w800,
               ),
@@ -764,6 +795,39 @@ class _OrderCard extends StatelessWidget {
           '${order.fulfillment} order',
           style: const TextStyle(fontSize: 9, color: _muted, height: 1.5),
         ),
+        if (order.sourceOrder case final sourceOrder?
+            when sourceOrder.items.isNotEmpty) ...[
+          const SizedBox(height: 8),
+          ...sourceOrder.items.map(
+            (item) => Padding(
+              padding: const EdgeInsets.only(bottom: 5),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    '${item.quantity} x ${item.productName}  •  '
+                    '${item.decisionStatus.name[0].toUpperCase()}'
+                    '${item.decisionStatus.name.substring(1)}',
+                    style: TextStyle(
+                      fontSize: 9,
+                      color: item.decisionStatus == OrderItemStatus.rejected
+                          ? Colors.red
+                          : item.decisionStatus == OrderItemStatus.accepted
+                          ? const Color(0xFF009B70)
+                          : _muted,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  if (item.decisionReason != null)
+                    Text(
+                      'Reason: ${item.decisionReason}',
+                      style: const TextStyle(fontSize: 9, color: Colors.red),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        ],
         const SizedBox(height: 8),
         Align(
           alignment: Alignment.centerRight,

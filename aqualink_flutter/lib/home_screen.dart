@@ -219,6 +219,20 @@ class _DashboardPageState extends State<_DashboardPage> {
         .incomingOrdersForStation(widget.station)
         .where((order) => order.status == OrderStatus.pending)
         .toList();
+    final rejectedProducts =
+        <({WaterOrder order, CartItem item, String? reason})>[];
+    for (final order in state.incomingOrdersForStation(widget.station)) {
+      for (final item in order.items) {
+        if (order.status == OrderStatus.rejected ||
+            item.decisionStatus == OrderItemStatus.rejected) {
+          rejectedProducts.add((
+            order: order,
+            item: item,
+            reason: item.decisionReason ?? order.reason,
+          ));
+        }
+      }
+    }
     return _PageScaffold(
       title: 'Owner Dashboard',
       subtitle: 'Water Station Management',
@@ -305,6 +319,35 @@ class _DashboardPageState extends State<_DashboardPage> {
                 detail: '${order.customer} has an order waiting for acceptance',
                 status: 'Review',
                 color: _green,
+                onTap: () => widget.onNavigate(1),
+              ),
+            ),
+          const SizedBox(height: 18),
+          _SectionTitle(
+            'REJECTED PRODUCTS',
+            trailing:
+                '${rejectedProducts.length} '
+                '${rejectedProducts.length == 1 ? 'product' : 'products'}',
+          ),
+          const SizedBox(height: 9),
+          if (rejectedProducts.isEmpty)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: Text(
+                'No rejected products for this station.',
+                style: TextStyle(fontSize: 11, color: _muted),
+              ),
+            )
+          else
+            ...rejectedProducts.map(
+              (entry) => _AttentionRow(
+                name: '${entry.item.quantity} x ${entry.item.productName}',
+                detail: [
+                  '#${entry.order.number}',
+                  if (entry.reason != null) 'Reason: ${entry.reason}',
+                ].join('  •  '),
+                status: 'Rejected',
+                color: Colors.red,
                 onTap: () => widget.onNavigate(1),
               ),
             ),
@@ -712,11 +755,6 @@ class _ProductsPageState extends State<_ProductsPage> {
     return _PageScaffold(
       title: 'Products',
       subtitle: 'Manage inventory and pricing',
-      action: IconButton(
-        tooltip: 'Add product',
-        onPressed: () => _editProduct(),
-        icon: const Icon(Icons.add_circle_outline, color: _green),
-      ),
       child: ListView(
         padding: const EdgeInsets.all(18),
         children: [
@@ -920,15 +958,17 @@ class _OwnerOrder extends StatelessWidget {
     number: order.number,
     customer: order.customer,
     total: 'P${order.total}',
-    status: _orderStatusLabel(order.status),
+    status: _orderStatusLabel(order),
     fulfillment: order.fulfillmentMethod == FulfillmentMethod.delivery
         ? 'Delivery'
         : 'Pickup',
     order: order,
   );
 
-  static String _orderStatusLabel(OrderStatus status) =>
-      status.name[0].toUpperCase() + status.name.substring(1);
+  static String _orderStatusLabel(WaterOrder order) {
+    if (order.isPartiallyAccepted) return 'Partially accepted';
+    return order.status.name[0].toUpperCase() + order.status.name.substring(1);
+  }
 
   Future<void> _saveStatus(
     BuildContext context,
@@ -958,6 +998,44 @@ class _OwnerOrder extends StatelessWidget {
       status: status,
       reason: reason,
     );
+  }
+
+  Future<void> _saveItemDecision(
+    BuildContext context,
+    int itemIndex,
+    OrderItemStatus status, {
+    String? reason,
+  }) async {
+    final currentOrder = order;
+    if (currentOrder == null) return;
+    if (Firebase.apps.isNotEmpty) {
+      try {
+        await FirestoreService.updateOrderItemStatus(
+          number: currentOrder.number,
+          itemIndex: itemIndex,
+          status: status,
+          reason: reason,
+        );
+      } catch (error) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text('Could not update product decision: $error')),
+        );
+        return;
+      }
+    }
+    if (!context.mounted) return;
+    final updated = AppScope.of(context).updateOrderItemStatus(
+      number: currentOrder.number,
+      itemIndex: itemIndex,
+      status: status,
+      reason: reason,
+    );
+    if (!updated) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('This product has already been decided.')),
+      );
+    }
   }
 
   LatLng? _stationLocation(String stationName) => switch (stationName) {
@@ -1188,6 +1266,45 @@ class _OwnerOrder extends StatelessWidget {
     await _saveStatus(context, OrderStatus.rejected, reason: reason);
   }
 
+  Future<void> _rejectItem(BuildContext context, int itemIndex) async {
+    var enteredReason = '';
+    final reason = await showDialog<String>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: const Text('Reject this product'),
+        content: TextField(
+          autofocus: true,
+          maxLines: 3,
+          onChanged: (value) => enteredReason = value,
+          decoration: const InputDecoration(
+            labelText: 'Reason',
+            hintText: 'Explain why this product is unavailable',
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: const Text('Keep product'),
+          ),
+          FilledButton(
+            onPressed: () {
+              final reason = enteredReason.trim();
+              if (reason.isNotEmpty) Navigator.pop(context, reason);
+            },
+            child: const Text('Reject product'),
+          ),
+        ],
+      ),
+    );
+    if (!context.mounted || reason == null) return;
+    await _saveItemDecision(
+      context,
+      itemIndex,
+      OrderItemStatus.rejected,
+      reason: reason,
+    );
+  }
+
   @override
   Widget build(BuildContext context) => Container(
     margin: const EdgeInsets.only(bottom: 12),
@@ -1235,17 +1352,128 @@ class _OwnerOrder extends StatelessWidget {
                     ),
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    order == null
-                        ? '2 x Purified Water (5 Gal)\n1 x Mineral Water (5 Gal)'
-                        : order!.items
-                              .map(
-                                (item) =>
-                                    '${item.quantity} x ${item.productName}',
-                              )
-                              .join('\n'),
-                    style: TextStyle(fontSize: 9, color: _muted, height: 1.6),
-                  ),
+                  if (order == null)
+                    const Text(
+                      '2 x Purified Water (5 Gal)\n1 x Mineral Water (5 Gal)',
+                      style: TextStyle(fontSize: 9, color: _muted, height: 1.6),
+                    )
+                  else
+                    ...order!.items
+                        .asMap()
+                        .entries
+                        .where(
+                          (entry) =>
+                              entry.value.decisionStatus !=
+                              OrderItemStatus.rejected,
+                        )
+                        .map((entry) {
+                          final itemIndex = entry.key;
+                          final item = entry.value;
+                          final itemStatus = item.decisionStatus;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: 6),
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  '${item.quantity} x ${item.productName}',
+                                  style: const TextStyle(
+                                    fontSize: 9,
+                                    color: _muted,
+                                    height: 1.6,
+                                  ),
+                                ),
+                                if (itemStatus == OrderItemStatus.pending)
+                                  Row(
+                                    children: [
+                                      Expanded(
+                                        child: FilledButton.icon(
+                                          onPressed: () => _saveItemDecision(
+                                            context,
+                                            itemIndex,
+                                            OrderItemStatus.accepted,
+                                          ),
+                                          icon: const Icon(
+                                            Icons.check,
+                                            size: 14,
+                                          ),
+                                          label: const Text(
+                                            'Accept product',
+                                            maxLines: 1,
+                                            style: TextStyle(fontSize: 9),
+                                          ),
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor: _green,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                            ),
+                                            minimumSize: const Size(0, 36),
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                          ),
+                                        ),
+                                      ),
+                                      const SizedBox(width: 8),
+                                      Expanded(
+                                        child: FilledButton.icon(
+                                          onPressed: () =>
+                                              _rejectItem(context, itemIndex),
+                                          icon: const Icon(
+                                            Icons.close,
+                                            size: 14,
+                                          ),
+                                          label: const Text(
+                                            'Reject product',
+                                            maxLines: 1,
+                                            style: TextStyle(fontSize: 9),
+                                          ),
+                                          style: FilledButton.styleFrom(
+                                            backgroundColor:
+                                                Colors.red.shade700,
+                                            foregroundColor: Colors.white,
+                                            padding: const EdgeInsets.symmetric(
+                                              horizontal: 6,
+                                            ),
+                                            minimumSize: const Size(0, 36),
+                                            tapTargetSize: MaterialTapTargetSize
+                                                .shrinkWrap,
+                                            visualDensity:
+                                                VisualDensity.compact,
+                                          ),
+                                        ),
+                                      ),
+                                    ],
+                                  )
+                                else ...[
+                                  Text(
+                                    itemStatus == OrderItemStatus.accepted
+                                        ? 'Accepted'
+                                        : 'Rejected',
+                                    style: TextStyle(
+                                      fontSize: 9,
+                                      color:
+                                          itemStatus == OrderItemStatus.accepted
+                                          ? _green
+                                          : Colors.red,
+                                      fontWeight: FontWeight.w700,
+                                    ),
+                                  ),
+                                  if (item.decisionReason != null)
+                                    Text(
+                                      'Reason: ${item.decisionReason}',
+                                      style: const TextStyle(
+                                        fontSize: 9,
+                                        color: Colors.red,
+                                      ),
+                                    ),
+                                ],
+                              ],
+                            ),
+                          );
+                        }),
                   const SizedBox(height: 4),
                   Text(
                     order == null
@@ -1294,7 +1522,8 @@ class _OwnerOrder extends StatelessWidget {
           ],
         ),
         const SizedBox(height: 12),
-        if (order == null || order!.status == OrderStatus.pending)
+        if (order == null ||
+            (order!.status == OrderStatus.pending && order!.items.isEmpty))
           Row(
             children: [
               Expanded(

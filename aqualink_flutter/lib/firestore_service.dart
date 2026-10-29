@@ -426,15 +426,7 @@ class FirestoreService {
       'deliveryLatitude': order.deliveryLatitude,
       'deliveryLongitude': order.deliveryLongitude,
       'reason': order.reason ?? '',
-      'items': order.items
-          .map(
-            (item) => {
-              'productName': item.productName,
-              'price': item.price,
-              'quantity': item.quantity,
-            },
-          )
-          .toList(),
+      'items': order.items.map((item) => _orderItemData(item)).toList(),
       'createdAt': FieldValue.serverTimestamp(),
       'updatedAt': FieldValue.serverTimestamp(),
     }, SetOptions(merge: true));
@@ -449,6 +441,8 @@ class FirestoreService {
           'productName': item.productName,
           'price': item.price,
           'quantity': item.quantity,
+          'decisionStatus': item.decisionStatus.name,
+          'decisionReason': item.decisionReason ?? '',
           'updatedAt': FieldValue.serverTimestamp(),
         },
         SetOptions(merge: true),
@@ -537,10 +531,16 @@ class FirestoreService {
                 if (name is! String || price is! num || quantity is! num) {
                   return null;
                 }
+                final decisionStatus = rawItem['decisionStatus'];
                 return CartItem(
                   productName: name,
                   price: price.toInt(),
                   quantity: quantity.toInt(),
+                  decisionStatus: OrderItemStatus.values.firstWhere(
+                    (itemStatus) => itemStatus.name == decisionStatus,
+                    orElse: () => OrderItemStatus.pending,
+                  ),
+                  decisionReason: _optionalString(rawItem['decisionReason']),
                 );
               })
               .whereType<CartItem>()
@@ -595,4 +595,91 @@ class FirestoreService {
       'completedAt': FieldValue.serverTimestamp(),
     'updatedAt': FieldValue.serverTimestamp(),
   });
+
+  static Future<void> updateOrderItemStatus({
+    required String number,
+    required int itemIndex,
+    required OrderItemStatus status,
+    String? reason,
+  }) async {
+    if (status == OrderItemStatus.pending ||
+        (status == OrderItemStatus.rejected &&
+            (reason == null || reason.trim().isEmpty))) {
+      throw ArgumentError('A decision and rejection reason are required.');
+    }
+
+    final orderReference = _db.collection('orders').doc(number);
+    await _db.runTransaction((transaction) async {
+      final snapshot = await transaction.get(orderReference);
+      final data = snapshot.data();
+      if (data == null) throw StateError('Order $number was not found.');
+      final order = _orderFromData(snapshot.id, data);
+      if (order == null ||
+          order.status != OrderStatus.pending ||
+          itemIndex < 0 ||
+          itemIndex >= order.items.length ||
+          order.items[itemIndex].decisionStatus != OrderItemStatus.pending) {
+        throw StateError('This product has already been decided.');
+      }
+
+      final updatedItems = List<CartItem>.of(order.items);
+      updatedItems[itemIndex] = updatedItems[itemIndex].copyWith(
+        decisionStatus: status,
+        decisionReason: status == OrderItemStatus.rejected
+            ? reason!.trim()
+            : null,
+      );
+      final hasPendingItems = updatedItems.any(
+        (item) => item.decisionStatus == OrderItemStatus.pending,
+      );
+      final hasAcceptedItems = updatedItems.any(
+        (item) => item.decisionStatus == OrderItemStatus.accepted,
+      );
+      final hasAvailableItems = updatedItems.any(
+        (item) => item.decisionStatus != OrderItemStatus.rejected,
+      );
+      final orderStatus = hasPendingItems
+          ? OrderStatus.pending
+          : hasAcceptedItems
+          ? OrderStatus.accepted
+          : OrderStatus.rejected;
+      final total =
+          updatedItems
+              .where((item) => item.decisionStatus != OrderItemStatus.rejected)
+              .fold(
+                0,
+                (subtotal, item) => subtotal + item.price * item.quantity,
+              ) +
+          (hasAvailableItems &&
+                  order.fulfillmentMethod == FulfillmentMethod.delivery
+              ? order.deliveryFee
+              : 0);
+
+      transaction.update(orderReference, {
+        'items': updatedItems.map(_orderItemData).toList(),
+        'status': orderStatus.name,
+        'total': total,
+        'updatedAt': FieldValue.serverTimestamp(),
+      });
+      transaction.set(
+        _db.collection('order_items').doc('${order.number}_$itemIndex'),
+        {
+          'decisionStatus': status.name,
+          'decisionReason': status == OrderItemStatus.rejected
+              ? reason!.trim()
+              : '',
+          'updatedAt': FieldValue.serverTimestamp(),
+        },
+        SetOptions(merge: true),
+      );
+    });
+  }
+
+  static Map<String, Object?> _orderItemData(CartItem item) => {
+    'productName': item.productName,
+    'price': item.price,
+    'quantity': item.quantity,
+    'decisionStatus': item.decisionStatus.name,
+    'decisionReason': item.decisionReason ?? '',
+  };
 }

@@ -10,6 +10,7 @@ import 'package:latlong2/latlong.dart' show LatLng;
 
 import 'clarin_barangay_locations.dart';
 import 'firestore_service.dart';
+import 'models/models.dart';
 
 String trackingApiBaseUrl({
   required bool isWeb,
@@ -26,6 +27,7 @@ String trackingApiBaseUrl({
 class ApiOrderTrackingScreen extends StatefulWidget {
   final String orderId;
   final int? orderTotal;
+  final List<CartItem> orderItems;
   final String? orderStatus;
   final String? stationName;
   final String? barangay;
@@ -39,6 +41,7 @@ class ApiOrderTrackingScreen extends StatefulWidget {
     super.key,
     required this.orderId,
     this.orderTotal,
+    this.orderItems = const [],
     this.orderStatus,
     this.stationName,
     this.barangay,
@@ -238,6 +241,89 @@ class _ApiOrderTrackingScreenState extends State<ApiOrderTrackingScreen> {
               ),
             ],
             const SizedBox(height: 18),
+            if (widget.orderItems.isNotEmpty) ...[
+              Container(
+                padding: const EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  border: Border.all(color: const Color(0xFFE3EAEE)),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Text(
+                      'Items ordered',
+                      style: TextStyle(
+                        color: Color(0xFF17212B),
+                        fontSize: 16,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                    const SizedBox(height: 10),
+                    ...widget.orderItems.map(
+                      (item) => Padding(
+                        padding: const EdgeInsets.only(bottom: 8),
+                        child: Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    '${item.quantity} x ${item.productName}',
+                                    style: const TextStyle(
+                                      color: Color(0xFF17212B),
+                                      fontSize: 12,
+                                      fontWeight: FontWeight.w600,
+                                    ),
+                                  ),
+                                  Text(
+                                    item.decisionStatus.name[0].toUpperCase() +
+                                        item.decisionStatus.name.substring(1),
+                                    style: TextStyle(
+                                      color: switch (item.decisionStatus) {
+                                        OrderItemStatus.accepted => const Color(
+                                          0xFF009B70,
+                                        ),
+                                        OrderItemStatus.rejected => Colors.red,
+                                        OrderItemStatus.pending => const Color(
+                                          0xFF71808D,
+                                        ),
+                                      },
+                                      fontSize: 10,
+                                    ),
+                                  ),
+                                  if (item.decisionReason != null)
+                                    Text(
+                                      'Reason: ${item.decisionReason}',
+                                      style: const TextStyle(
+                                        color: Colors.red,
+                                        fontSize: 10,
+                                      ),
+                                    ),
+                                ],
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              'P${item.price * item.quantity}',
+                              style: const TextStyle(
+                                color: Color(0xFF17212B),
+                                fontSize: 12,
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 14),
+            ],
             Container(
               padding: const EdgeInsets.all(16),
               decoration: BoxDecoration(

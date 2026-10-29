@@ -89,7 +89,26 @@ service cloud.firestore {
       allow update: if isOwnerForStation(resource.data.station)
         && request.resource.data.station == resource.data.station
         && request.resource.data.diff(resource.data).affectedKeys()
-          .hasOnly(['status', 'reason', 'completedAt', 'updatedAt']);
+          .hasOnly([
+            'status',
+            'reason',
+            'completedAt',
+            'updatedAt',
+            'items',
+            'total'
+          ])
+        && request.resource.data.status in [
+          'pending',
+          'accepted',
+          'rejected',
+          'cancelled',
+          'delivered',
+          'completed'
+        ]
+        && (!request.resource.data.diff(resource.data).affectedKeys()
+              .hasAny(['items', 'total'])
+          || (request.resource.data.items is list
+            && request.resource.data.total is number));
       allow delete: if false;
     }
 
@@ -98,7 +117,19 @@ service cloud.firestore {
       allow create: if signedIn()
         && getAfter(orderPath(request.resource.data.orderNumber)).data.customerUid
           == request.auth.uid;
-      allow update, delete: if false;
+      allow update: if isOwnerForStation(
+          get(orderPath(resource.data.orderNumber)).data.station)
+        && get(orderPath(resource.data.orderNumber)).data.status == 'pending'
+        && request.resource.data.orderNumber == resource.data.orderNumber
+        && request.resource.data.station == resource.data.station
+        && request.resource.data.diff(resource.data).affectedKeys()
+          .hasOnly(['decisionStatus', 'decisionReason', 'updatedAt'])
+        && request.resource.data.decisionStatus in ['accepted', 'rejected']
+        && request.resource.data.decisionReason is string
+        && (request.resource.data.decisionStatus == 'rejected'
+          ? request.resource.data.decisionReason.size() > 0
+          : request.resource.data.decisionReason == '');
+      allow delete: if false;
     }
 
     match /deliveries/{deliveryId} {

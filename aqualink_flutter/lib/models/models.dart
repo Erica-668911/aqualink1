@@ -94,6 +94,8 @@ enum OrderStatus {
   completed,
 }
 
+enum OrderItemStatus { pending, accepted, rejected }
+
 class WaterOrder {
   final String number;
   final String station;
@@ -131,16 +133,27 @@ class WaterOrder {
     this.completedAt,
   });
 
+  bool get hasPendingItems =>
+      items.any((item) => item.decisionStatus == OrderItemStatus.pending);
+  bool get hasAcceptedItems =>
+      items.any((item) => item.decisionStatus == OrderItemStatus.accepted);
+  bool get hasRejectedItems =>
+      items.any((item) => item.decisionStatus == OrderItemStatus.rejected);
+  bool get isPartiallyAccepted =>
+      status == OrderStatus.accepted && hasAcceptedItems && hasRejectedItems;
+
   WaterOrder copyWith({
     OrderStatus? status,
+    List<CartItem>? items,
+    int? total,
     String? reason,
     DateTime? completedAt,
   }) => WaterOrder(
     number: number,
     station: station,
     customer: customer,
-    items: items,
-    total: total,
+    items: items ?? this.items,
+    total: total ?? this.total,
     deliveryFee: deliveryFee,
     fulfillmentMethod: fulfillmentMethod,
     deliveryAddress: deliveryAddress,
@@ -159,17 +172,27 @@ class CartItem {
   final String productName;
   final int price;
   final int quantity;
+  final OrderItemStatus decisionStatus;
+  final String? decisionReason;
 
   const CartItem({
     required this.productName,
     required this.price,
     required this.quantity,
+    this.decisionStatus = OrderItemStatus.pending,
+    this.decisionReason,
   });
 
-  CartItem copyWith({int? quantity}) => CartItem(
+  CartItem copyWith({
+    int? quantity,
+    OrderItemStatus? decisionStatus,
+    String? decisionReason,
+  }) => CartItem(
     productName: productName,
     price: price,
     quantity: quantity ?? this.quantity,
+    decisionStatus: decisionStatus ?? this.decisionStatus,
+    decisionReason: decisionReason ?? this.decisionReason,
   );
 }
 
