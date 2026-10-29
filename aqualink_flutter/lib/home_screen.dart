@@ -1474,6 +1474,18 @@ class _OwnerOrder extends StatelessWidget {
                             ),
                           );
                         }),
+                  const SizedBox(height: 2),
+                  Align(
+                    alignment: Alignment.centerRight,
+                    child: Text(
+                      total,
+                      style: const TextStyle(
+                        fontSize: 13,
+                        fontWeight: FontWeight.w800,
+                        color: _ink,
+                      ),
+                    ),
+                  ),
                   const SizedBox(height: 4),
                   Text(
                     order == null
@@ -1509,14 +1521,6 @@ class _OwnerOrder extends StatelessWidget {
                     ),
                   ],
                 ],
-              ),
-            ),
-            Text(
-              total,
-              style: const TextStyle(
-                fontSize: 13,
-                fontWeight: FontWeight.w800,
-                color: _ink,
               ),
             ),
           ],
